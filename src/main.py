@@ -4,21 +4,18 @@ import signal
 import sys
 import time
 import threading
+import asyncio
 from typing import Optional
 
 import uvicorn
 
-from config import (
-    APP_NAME,
-    APP_VERSION,
-    API_HOST,
-    API_PORT,
-    SYNC_INTERVAL,
-    DEBUG
-)
-from logger import logger
-from storage import storage
-from sync_service import sync_all_calendars
+from src.config import Config
+from src.logger import get_logger
+from src.storage import Storage
+from src.sync_service import SyncService
+
+# Logger
+logger = get_logger("main")
 
 
 class AirbnBook:
@@ -27,6 +24,8 @@ class AirbnBook:
     def __init__(self):
         self.running = False
         self.sync_thread: Optional[threading.Thread] = None
+        self.storage = Storage()
+        self.sync_service = SyncService(self.storage)
         
         # Configurer les handlers de signaux
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -39,14 +38,14 @@ class AirbnBook:
     
     def _sync_loop(self):
         """Boucle de synchronisation périodique."""
-        logger.info(f"Démarrage de la boucle de sync (intervalle: {SYNC_INTERVAL} min)")
+        logger.info(f"Démarrage de la boucle de sync (intervalle: {Config.SYNC_INTERVAL} min)")
         
         # Première synchronisation immédiate
         self._do_sync()
         
         while self.running:
             # Attendre avec vérification périodique pour permettre l'arrêt
-            for _ in range(SYNC_INTERVAL * 60):
+            for _ in range(Config.SYNC_INTERVAL * 60):
                 if not self.running:
                     break
                 time.sleep(1)
@@ -59,70 +58,99 @@ class AirbnBook:
     def _do_sync(self):
         """Effectue une synchronisation."""
         try:
-            calendars = storage.get_all_calendars(enabled_only=True)
+            sources = self.storage.get_sources()
+            enabled_sources = [s for s in sources if s.get("enabled", True)]
             
-            if calendars:
-                logger.info(f"🔄 Synchronisation de {len(calendars)} calendrier(s)...")
-                results = sync_all_calendars(calendars)
+            if enabled_sources:
+                logger.info(f"🔄 Synchronisation de {len(enabled_sources)} source(s)...")
                 
-                # Traiter les résultats
-                success_count = 0
-                total_events = 0
-                
-                for result in results:
-                    if result.get("success") and "events" in result:
-                        calendar_id = result["calendar_id"]
-                        events = result["events"]
-                        storage.save_events(calendar_id, events)
-                        success_count += 1
-                        total_events += len(events)
-                    elif not result.get("success"):
-                        logger.warning(
-                            f"Échec sync {result.get('calendar_name', 'inconnu')}: "
-                            f"{result.get('error', 'erreur inconnue')}"
-                        )
+                # Exécuter la sync async dans un event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(self.sync_service.sync_all())
+                finally:
+                    loop.close()
                 
                 logger.info(
-                    f"✅ Sync terminée: {success_count}/{len(calendars)} calendrier(s), "
-                    f"{total_events} événement(s)"
+                    f"✅ Sync terminée: {result.get('sources_synced', 0)}/{len(enabled_sources)} source(s), "
+                    f"{result.get('events_count', 0)} événement(s)"
                 )
             else:
-                logger.debug("Aucun calendrier actif à synchroniser")
+                logger.debug("Aucune source active à synchroniser")
                 
         except Exception as e:
-            logger.error(f"Erreur dans la synchronisation: {e}", exc_info=DEBUG)
+            logger.error(f"Erreur dans la synchronisation: {e}", exc_info=Config.DEBUG)
     
-    def _init_calendars(self):
-        """Initialise les calendriers par défaut depuis .env si nécessaire."""
-        logger.info("Vérification des calendriers...")
+    def _init_sources(self):
+        """Initialise les sources par défaut depuis .env si nécessaire."""
+        logger.info("Vérification des sources de calendriers...")
         
-        existing = storage.get_all_calendars()
+        existing = self.storage.get_sources()
+        
         if existing:
-            logger.info(f"📅 {len(existing)} calendrier(s) existant(s):")
-            for cal in existing:
-                status = "✓" if cal.get("enabled", True) else "○"
-                logger.info(f"   {status} {cal['name']} ({cal.get('source', 'inconnu')})")
+            logger.info(f"📅 {len(existing)} source(s) existante(s):")
+            for source in existing:
+                status = "✓" if source.get("enabled", True) else "○"
+                logger.info(f"   {status} {source['name']} ({source.get('source_type', 'inconnu')})")
         else:
-            # Charger les calendriers par défaut depuis .env
-            added = storage.init_default_calendars()
+            # Charger les sources par défaut depuis .env
+            added = self._load_default_sources()
             if added == 0:
                 logger.warning(
-                    "⚠️  Aucun calendrier configuré. "
-                    "Ajoutez-en via l'API ou configurez AIRBNB_ICS/BOOKING_ICS dans .env"
+                    "⚠️  Aucune source configurée. "
+                    "Ajoutez-en via l'API ou configurez AIRBNB_ICS_URL/BOOKING_ICS_URL dans .env"
                 )
+    
+    def _load_default_sources(self) -> int:
+        """Charge les sources par défaut depuis les variables d'environnement."""
+        added = 0
+        
+        # Charger Airbnb si configuré
+        if Config.AIRBNB_ICS_URL:
+            source = {
+                "id": "default_airbnb",
+                "name": "Airbnb (défaut)",
+                "url": Config.AIRBNB_ICS_URL,
+                "source_type": "airbnb",
+                "property_name": Config.PROPERTY_NAME,
+                "enabled": True,
+                "created_at": None
+            }
+            self.storage.add_source(source)
+            logger.info(f"✅ Source Airbnb ajoutée depuis .env")
+            added += 1
+        
+        # Charger Booking si configuré
+        if Config.BOOKING_ICS_URL:
+            source = {
+                "id": "default_booking",
+                "name": "Booking (défaut)",
+                "url": Config.BOOKING_ICS_URL,
+                "source_type": "booking",
+                "property_name": Config.PROPERTY_NAME,
+                "enabled": True,
+                "created_at": None
+            }
+            self.storage.add_source(source)
+            logger.info(f"✅ Source Booking ajoutée depuis .env")
+            added += 1
+        
+        return added
     
     def start(self):
         """Démarre l'application."""
         logger.info(f"{'='*50}")
-        logger.info(f"  🏠 {APP_NAME} v{APP_VERSION}")
+        logger.info(f"  🏠 {Config.APP_NAME} v{Config.APP_VERSION}")
         logger.info(f"{'='*50}")
-        logger.info(f"Mode debug: {DEBUG}")
-        logger.info(f"API: http://{API_HOST}:{API_PORT}")
-        logger.info(f"Intervalle de sync: {SYNC_INTERVAL} minutes")
+        logger.info(f"Mode debug: {Config.DEBUG}")
+        logger.info(f"API: http://{Config.API_HOST}:{Config.API_PORT}")
+        logger.info(f"Intervalle de sync: {Config.SYNC_INTERVAL} minutes")
+        logger.info(f"Documentation: http://{Config.API_HOST}:{Config.API_PORT}/api/docs")
         logger.info("")
         
-        # Initialiser les calendriers par défaut
-        self._init_calendars()
+        # Initialiser les sources par défaut
+        self._init_sources()
         
         self.running = True
         
@@ -135,12 +163,12 @@ class AirbnBook:
         logger.info(f"🚀 Démarrage du serveur API...")
         try:
             uvicorn.run(
-                "api:app",
-                host=API_HOST,
-                port=API_PORT,
-                reload=DEBUG,
-                log_level="debug" if DEBUG else "warning",
-                access_log=DEBUG
+                "src.api:app",
+                host=Config.API_HOST,
+                port=Config.API_PORT,
+                reload=Config.DEBUG,
+                log_level="debug" if Config.DEBUG else "warning",
+                access_log=Config.DEBUG
             )
         except Exception as e:
             logger.error(f"Erreur serveur API: {e}")
