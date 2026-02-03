@@ -1,128 +1,70 @@
-import os
-import re
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
 import logging
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+import os
 from src.config import Config
+from src.utils import translate_ics_summary_only, unfold, fold
 
-app = FastAPI()
-config = Config()
+translate_router = APIRouter()
 
-# Configuration des logs
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler(f"{config.LOG_DIR}/airbnbook.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-def unfold(ics: str) -> str:
-    """Déplie les lignes d'un fichier ICS."""
-    lines = ics.splitlines()
-    out = []
-    for line in lines:
-        if line.startswith(" "):
-            if out:
-                out[-1] += line[1:]
-        else:
-            out.append(line)
-    return "\n".join(out)
-
-def fold(ics: str, limit: int = 75) -> str:
-    """Replie les lignes d'un fichier ICS."""
-    out_lines = []
-    for line in ics.splitlines():
-        raw = line.encode("utf-8")
-        if len(raw) <= limit:
-            out_lines.append(line)
-            continue
-        start = 0
-        while start < len(raw):
-            chunk = raw[start:start+limit]
-            text = chunk.decode("utf-8", errors="ignore")
-            if start == 0:
-                out_lines.append(text)
-            else:
-                out_lines.append(" " + text)
-            start += len(chunk)
-    return "\n".join(out_lines)
-
-def normalize(s: str) -> str:
-    """Normalise une chaîne de caractères."""
-    return re.sub(r"\s+", " ", s).strip().lower()
-
-def translate_summary(value: str) -> str:
-    """Traduit un libellé en français."""
-    v = normalize(value)
-    if v == "airbnb (not available)":
-        return "Airbnb (Date bloquée)"
-    if v == "reserved":
-        return "Airbnb (Réservation)"
-    if v == "closed - not available":
-        return "Booking (Réservation)"
-    return value
-
-def translate_ics_summary_only(ics_unfolded: str) -> str:
-    """Traduit les libellés d'un fichier ICS."""
-    out = []
-    for line in ics_unfolded.splitlines():
-        up = line.upper()
-        if up.startswith("SUMMARY:") or up.startswith("SUMMARY;"):
-            if ":" in line:
-                k, v = line.split(":", 1)
-                v2 = translate_summary(v)
-                out.append(f"{k}:{v2}")
-            else:
-                out.append(line)
-        else:
-            out.append(line)
-    return "\n".join(out)
-
-@app.get("/healthz")
-def healthz():
-    """Vérifie l'état du service."""
+@translate_router.get("/health", summary="Vérifie l'état du service")
+async def health_check():
+    """Vérifie l'état du service de traduction."""
     return {
-        "ok": True,
-        "infile_exists": os.path.exists(config.OUTFILE),
-        "infile": config.OUTFILE,
-        "outfile": config.OUTFILE_FR,
+        "status": "ok",
+        "input_file": Config.OUTFILE,
+        "output_file": Config.OUTFILE_FR
     }
 
-@app.post("/sync")
-def sync():
-    """Traduit le calendrier fusionné."""
-    if not os.path.exists(config.OUTFILE):
-        logger.error(f"Source manquante: {config.OUTFILE}. Lancez d'abord /sync côté fusion.")
-        raise HTTPException(status_code=404, detail=f"Source manquante: {config.OUTFILE}. Lancez d'abord /sync côté fusion.")
+@translate_router.post("/sync", summary="Traduit le calendrier")
+async def translate_calendar():
+    """Traduit les libellés du calendrier en français."""
+    if not os.path.exists(Config.OUTFILE):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Le fichier fusionné {Config.OUTFILE} n'existe pas. Lancez d'abord /api/fusion/sync."
+        )
 
     try:
-        with open(config.OUTFILE, "r", encoding="utf-8") as f:
-            src = f.read()
+        with open(Config.OUTFILE, "r", encoding="utf-8") as f:
+            ics_content = f.read()
 
-        unfolded = unfold(src)
+        unfolded = unfold(ics_content)
         translated = translate_ics_summary_only(unfolded)
         folded = fold(translated)
 
-        os.makedirs(os.path.dirname(config.OUTFILE_FR), exist_ok=True)
-        tmp = config.OUTFILE_FR + ".tmp"
-        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-            f.write(folded if folded.endswith("\n") else folded + "\n")
-        os.replace(tmp, config.OUTFILE_FR)
-        logger.info(f"Fichier traduit écrit dans {config.OUTFILE_FR}")
-        return {"written": config.OUTFILE_FR, "bytes": os.path.getsize(config.OUTFILE_FR)}
-    except Exception as e:
-        logger.error(f"Erreur lors de la traduction: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Création du répertoire si nécessaire
+        os.makedirs(os.path.dirname(Config.OUTFILE_FR), exist_ok=True)
 
-@app.get("/export")
-def export():
-    """Exporte le calendrier traduit."""
-    if not os.path.exists(config.OUTFILE_FR):
-        logger.error("Fichier FR introuvable. Lancez /sync.")
-        raise HTTPException(status_code=404, detail="Fichier FR introuvable. Lancez /sync.")
-    with open(config.OUTFILE_FR, "r", encoding="utf-8") as f:
-        ics = f.read()
-    return Response(content=ics, media_type="text/calendar; charset=utf-8")
+        with open(Config.OUTFILE_FR, "w", encoding="utf-8") as f:
+            f.write(folded)
+
+        logging.info(f"Calendrier traduit écrit dans {Config.OUTFILE_FR}")
+        return JSONResponse(
+            content={
+                "status": "success",
+                "file": Config.OUTFILE_FR,
+                "message": "Calendrier traduit avec succès"
+            }
+        )
+    except Exception as e:
+        logging.error(f"Erreur lors de la traduction: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erreur lors de la traduction: {str(e)}"
+        )
+
+@translate_router.get("/export", summary="Exporte le calendrier traduit")
+async def export_calendar():
+    """Exporte le calendrier traduit au format .ics."""
+    if not os.path.exists(Config.OUTFILE_FR):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Le fichier traduit {Config.OUTFILE_FR} n'existe pas. Lancez d'abord /api/translate/sync."
+        )
+
+    return FileResponse(
+        Config.OUTFILE_FR,
+        media_type="text/calendar",
+        filename=os.path.basename(Config.OUTFILE_FR)
+    )
