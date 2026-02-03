@@ -43,7 +43,13 @@ class Storage:
     
     # === Calendriers ===
     
-    def add_calendar(self, name: str, url: str) -> Dict[str, Any]:
+    def add_calendar(
+        self,
+        name: str,
+        url: str,
+        source: Optional[str] = None,
+        enabled: bool = True
+    ) -> Dict[str, Any]:
         """Ajoute un nouveau calendrier."""
         with self.lock:
             calendar_id = str(uuid.uuid4())
@@ -52,6 +58,8 @@ class Storage:
                 "id": calendar_id,
                 "name": name,
                 "url": url,
+                "source": source or self._detect_source(url),
+                "enabled": enabled,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "last_sync": None,
                 "event_count": 0
@@ -63,13 +71,37 @@ class Storage:
             logger.info(f"Calendrier ajouté: {name} ({calendar_id})")
             return calendar
     
+    def _detect_source(self, url: str) -> str:
+        """Détecte la source du calendrier à partir de l'URL."""
+        url_lower = url.lower()
+        if "airbnb" in url_lower:
+            return "airbnb"
+        elif "booking" in url_lower:
+            return "booking"
+        elif "vrbo" in url_lower or "homeaway" in url_lower:
+            return "vrbo"
+        elif "abritel" in url_lower:
+            return "abritel"
+        else:
+            return "other"
+    
     def get_calendar(self, calendar_id: str) -> Optional[Dict[str, Any]]:
         """Récupère un calendrier par son ID."""
         return self._data["calendars"].get(calendar_id)
     
-    def get_all_calendars(self) -> List[Dict[str, Any]]:
+    def get_all_calendars(self, enabled_only: bool = False) -> List[Dict[str, Any]]:
         """Récupère tous les calendriers."""
-        return list(self._data["calendars"].values())
+        calendars = list(self._data["calendars"].values())
+        if enabled_only:
+            calendars = [c for c in calendars if c.get("enabled", True)]
+        return calendars
+    
+    def get_calendar_by_url(self, url: str) -> Optional[Dict[str, Any]]:
+        """Récupère un calendrier par son URL (pour éviter les doublons)."""
+        for calendar in self._data["calendars"].values():
+            if calendar.get("url") == url:
+                return calendar
+        return None
     
     def update_calendar(self, calendar_id: str, **kwargs) -> Optional[Dict[str, Any]]:
         """Met à jour un calendrier."""
@@ -77,8 +109,9 @@ class Storage:
             if calendar_id not in self._data["calendars"]:
                 return None
             
+            allowed_fields = {"name", "url", "source", "enabled", "last_sync", "event_count"}
             for key, value in kwargs.items():
-                if key in self._data["calendars"][calendar_id]:
+                if key in allowed_fields:
                     self._data["calendars"][calendar_id][key] = value
             
             self._save()
@@ -90,6 +123,8 @@ class Storage:
             if calendar_id not in self._data["calendars"]:
                 return False
             
+            name = self._data["calendars"][calendar_id].get("name", "inconnu")
+            
             # Supprimer les événements associés
             self._data["events"] = {
                 uid: event for uid, event in self._data["events"].items()
@@ -100,7 +135,7 @@ class Storage:
             del self._data["calendars"][calendar_id]
             self._save()
             
-            logger.info(f"Calendrier supprimé: {calendar_id}")
+            logger.info(f"Calendrier supprimé: {name} ({calendar_id})")
             return True
     
     # === Événements ===
@@ -118,6 +153,7 @@ class Storage:
             for event in events:
                 uid = event.get("uid")
                 if uid:
+                    event["calendar_id"] = calendar_id
                     self._data["events"][uid] = event
             
             # Mettre à jour le compteur du calendrier
@@ -158,13 +194,13 @@ class Storage:
             # Convertir en datetime si nécessaire
             if isinstance(event_start, str):
                 try:
-                    event_start = datetime.fromisoformat(event_start)
+                    event_start = datetime.fromisoformat(event_start.replace("Z", "+00:00"))
                 except ValueError:
                     continue
             
             if isinstance(event_end, str):
                 try:
-                    event_end = datetime.fromisoformat(event_end)
+                    event_end = datetime.fromisoformat(event_end.replace("Z", "+00:00"))
                 except ValueError:
                     event_end = event_start
             
@@ -174,6 +210,56 @@ class Storage:
                     filtered.append(event)
         
         return filtered
+    
+    # === Initialisation ===
+    
+    def init_default_calendars(self) -> int:
+        """
+        Charge les calendriers depuis les variables d'environnement 
+        si aucun calendrier n'existe.
+        
+        Returns:
+            Nombre de calendriers ajoutés
+        """
+        # Si des calendriers existent déjà, ne rien faire
+        if self.get_all_calendars():
+            logger.debug("Des calendriers existent déjà, pas d'initialisation")
+            return 0
+        
+        added = 0
+        
+        # Configuration des calendriers par défaut
+        default_calendars = [
+            ("AIRBNB_ICS", "Airbnb"),
+            ("BOOKING_ICS", "Booking.com"),
+            # Ajouter d'autres sources ici si besoin
+            ("VRBO_ICS", "VRBO"),
+            ("ABRITEL_ICS", "Abritel"),
+        ]
+        
+        for env_var, name in default_calendars:
+            url = os.getenv(env_var)
+            if url and url.strip():
+                # Vérifier que ce n'est pas un exemple/placeholder
+                if "example" in url.lower() or "12345" in url:
+                    logger.warning(f"URL d'exemple ignorée pour {env_var}")
+                    continue
+                
+                # Vérifier les doublons
+                if self.get_calendar_by_url(url):
+                    logger.warning(f"URL déjà existante, ignorée: {name}")
+                    continue
+                
+                self.add_calendar(name=name, url=url)
+                logger.info(f"✅ Calendrier '{name}' chargé depuis ${env_var}")
+                added += 1
+        
+        if added > 0:
+            logger.info(f"📅 {added} calendrier(s) par défaut initialisé(s)")
+        else:
+            logger.info("ℹ️  Aucun calendrier par défaut trouvé dans .env")
+        
+        return added
 
 
 # Instance globale
