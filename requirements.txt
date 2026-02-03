@@ -1,6 +1,19 @@
+# API Web
 fastapi==0.95.2
 uvicorn==0.22.0
+
+# HTTP
+requests==2.31.0
 httpx==0.24.1
+
+# iCalendar
+icalendar==5.0.11
+
+# Configuration
 python-dotenv==1.0.0
+
+# Templates
 jinja2==3.1.2
-icalendar>=5.0.0
+
+# Utilitaires
+python-dateutil==2.8.2
