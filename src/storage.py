@@ -1,4 +1,4 @@
-"""Stockage des données (calendriers et événements)."""
+"""Stockage des données (sources et événements)."""
 
 import json
 import os
@@ -7,260 +7,221 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from threading import Lock
 
-from config import DATA_DIR
-from logger import logger
+from src.config import Config
+from src.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class Storage:
-    """Gestionnaire de stockage JSON simple."""
+    """Gestionnaire de stockage JSON."""
     
-    def __init__(self, filename: str = "calendars.json"):
-        self.filepath = os.path.join(DATA_DIR, filename)
-        self.lock = Lock()
-        self._data = self._load()
-    
-    def _load(self) -> Dict[str, Any]:
-        """Charge les données depuis le fichier."""
-        if not os.path.exists(self.filepath):
-            return {"calendars": {}, "events": {}}
+    def __init__(self):
+        self._lock = Lock()
+        self._sources_file = Config.SOURCES_FILE
+        self._events_file = Config.EVENTS_FILE
         
+        # Créer les répertoires si nécessaire
+        Config.ensure_directories()
+        
+        # Initialiser les fichiers s'ils n'existent pas
+        self._init_files()
+    
+    def _init_files(self):
+        """Initialise les fichiers JSON s'ils n'existent pas."""
+        if not os.path.exists(self._sources_file):
+            self._write_json(self._sources_file, [])
+            logger.debug(f"Fichier créé: {self._sources_file}")
+        
+        if not os.path.exists(self._events_file):
+            self._write_json(self._events_file, [])
+            logger.debug(f"Fichier créé: {self._events_file}")
+    
+    def _read_json(self, filepath: str) -> Any:
+        """Lit un fichier JSON."""
         try:
-            with open(self.filepath, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            logger.error(f"Erreur chargement données: {e}")
-            return {"calendars": {}, "events": {}}
+            with self._lock:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except FileNotFoundError:
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"Erreur JSON dans {filepath}: {e}")
+            return []
     
-    def _save(self) -> bool:
-        """Sauvegarde les données dans le fichier."""
-        try:
-            with open(self.filepath, 'w', encoding='utf-8') as f:
-                json.dump(self._data, f, indent=2, default=str)
-            return True
-        except IOError as e:
-            logger.error(f"Erreur sauvegarde données: {e}")
-            return False
+    def _write_json(self, filepath: str, data: Any):
+        """Écrit dans un fichier JSON."""
+        with self._lock:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False, default=str)
     
-    # === Calendriers ===
+    # =========================================================================
+    # SOURCES (calendriers)
+    # =========================================================================
     
-    def add_calendar(
-        self,
-        name: str,
-        url: str,
-        source: Optional[str] = None,
-        enabled: bool = True
-    ) -> Dict[str, Any]:
-        """Ajoute un nouveau calendrier."""
-        with self.lock:
-            calendar_id = str(uuid.uuid4())
-            
-            calendar = {
-                "id": calendar_id,
-                "name": name,
-                "url": url,
-                "source": source or self._detect_source(url),
-                "enabled": enabled,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "last_sync": None,
-                "event_count": 0
-            }
-            
-            self._data["calendars"][calendar_id] = calendar
-            self._save()
-            
-            logger.info(f"Calendrier ajouté: {name} ({calendar_id})")
-            return calendar
+    def get_sources(self) -> List[Dict]:
+        """Récupère toutes les sources."""
+        return self._read_json(self._sources_file)
     
-    def _detect_source(self, url: str) -> str:
-        """Détecte la source du calendrier à partir de l'URL."""
-        url_lower = url.lower()
-        if "airbnb" in url_lower:
-            return "airbnb"
-        elif "booking" in url_lower:
-            return "booking"
-        elif "vrbo" in url_lower or "homeaway" in url_lower:
-            return "vrbo"
-        elif "abritel" in url_lower:
-            return "abritel"
-        else:
-            return "other"
-    
-    def get_calendar(self, calendar_id: str) -> Optional[Dict[str, Any]]:
-        """Récupère un calendrier par son ID."""
-        return self._data["calendars"].get(calendar_id)
-    
-    def get_all_calendars(self, enabled_only: bool = False) -> List[Dict[str, Any]]:
-        """Récupère tous les calendriers."""
-        calendars = list(self._data["calendars"].values())
-        if enabled_only:
-            calendars = [c for c in calendars if c.get("enabled", True)]
-        return calendars
-    
-    def get_calendar_by_url(self, url: str) -> Optional[Dict[str, Any]]:
-        """Récupère un calendrier par son URL (pour éviter les doublons)."""
-        for calendar in self._data["calendars"].values():
-            if calendar.get("url") == url:
-                return calendar
+    def get_source(self, source_id: str) -> Optional[Dict]:
+        """Récupère une source par ID."""
+        sources = self.get_sources()
+        for source in sources:
+            if source.get("id") == source_id:
+                return source
         return None
     
-    def update_calendar(self, calendar_id: str, **kwargs) -> Optional[Dict[str, Any]]:
-        """Met à jour un calendrier."""
-        with self.lock:
-            if calendar_id not in self._data["calendars"]:
-                return None
-            
-            allowed_fields = {"name", "url", "source", "enabled", "last_sync", "event_count"}
-            for key, value in kwargs.items():
-                if key in allowed_fields:
-                    self._data["calendars"][calendar_id][key] = value
-            
-            self._save()
-            return self._data["calendars"][calendar_id]
+    def add_source(self, name: str, url: str, source_type: str = "other", enabled: bool = True) -> Dict:
+        """Ajoute une nouvelle source."""
+        sources = self.get_sources()
+        
+        # Vérifier si l'URL existe déjà
+        for source in sources:
+            if source.get("url") == url:
+                logger.warning(f"Source avec URL déjà existante: {url}")
+                return source
+        
+        new_source = {
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "url": url,
+            "type": source_type,  # airbnb, booking, other
+            "enabled": enabled,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "last_sync": None,
+            "last_error": None,
+            "event_count": 0
+        }
+        
+        sources.append(new_source)
+        self._write_json(self._sources_file, sources)
+        logger.info(f"Source ajoutée: {name} ({source_type})")
+        
+        return new_source
     
-    def delete_calendar(self, calendar_id: str) -> bool:
-        """Supprime un calendrier et ses événements."""
-        with self.lock:
-            if calendar_id not in self._data["calendars"]:
-                return False
-            
-            name = self._data["calendars"][calendar_id].get("name", "inconnu")
+    def update_source(self, source_id: str, updates: Dict) -> Optional[Dict]:
+        """Met à jour une source."""
+        sources = self.get_sources()
+        
+        for i, source in enumerate(sources):
+            if source.get("id") == source_id:
+                # Champs non modifiables
+                updates.pop("id", None)
+                updates.pop("created_at", None)
+                
+                # Mettre à jour
+                source.update(updates)
+                source["updated_at"] = datetime.now(timezone.utc).isoformat()
+                sources[i] = source
+                
+                self._write_json(self._sources_file, sources)
+                logger.info(f"Source mise à jour: {source_id}")
+                return source
+        
+        return None
+    
+    def delete_source(self, source_id: str) -> bool:
+        """Supprime une source et ses événements."""
+        sources = self.get_sources()
+        initial_count = len(sources)
+        
+        sources = [s for s in sources if s.get("id") != source_id]
+        
+        if len(sources) < initial_count:
+            self._write_json(self._sources_file, sources)
             
             # Supprimer les événements associés
-            self._data["events"] = {
-                uid: event for uid, event in self._data["events"].items()
-                if event.get("calendar_id") != calendar_id
-            }
+            self.delete_events_by_source(source_id)
             
-            # Supprimer le calendrier
-            del self._data["calendars"][calendar_id]
-            self._save()
-            
-            logger.info(f"Calendrier supprimé: {name} ({calendar_id})")
+            logger.info(f"Source supprimée: {source_id}")
             return True
-    
-    # === Événements ===
-    
-    def save_events(self, calendar_id: str, events: List[Dict[str, Any]]) -> int:
-        """Sauvegarde les événements d'un calendrier."""
-        with self.lock:
-            # Supprimer les anciens événements du calendrier
-            self._data["events"] = {
-                uid: event for uid, event in self._data["events"].items()
-                if event.get("calendar_id") != calendar_id
-            }
-            
-            # Ajouter les nouveaux événements
-            for event in events:
-                uid = event.get("uid")
-                if uid:
-                    event["calendar_id"] = calendar_id
-                    self._data["events"][uid] = event
-            
-            # Mettre à jour le compteur du calendrier
-            if calendar_id in self._data["calendars"]:
-                self._data["calendars"][calendar_id]["event_count"] = len(events)
-                self._data["calendars"][calendar_id]["last_sync"] = \
-                    datetime.now(timezone.utc).isoformat()
-            
-            self._save()
-            return len(events)
-    
-    def get_events(self, calendar_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Récupère les événements (tous ou par calendrier)."""
-        events = list(self._data["events"].values())
         
-        if calendar_id:
-            events = [e for e in events if e.get("calendar_id") == calendar_id]
+        return False
+    
+    def init_default_sources(self) -> int:
+        """Initialise les sources par défaut depuis la config."""
+        added = 0
         
-        # Trier par date de début
-        events.sort(key=lambda x: x.get("start", ""))
+        if Config.AIRBNB_ICS_URL:
+            self.add_source(
+                name=f"{Config.PROPERTY_NAME} - Airbnb",
+                url=Config.AIRBNB_ICS_URL,
+                source_type="airbnb"
+            )
+            added += 1
+        
+        if Config.BOOKING_ICS_URL:
+            self.add_source(
+                name=f"{Config.PROPERTY_NAME} - Booking",
+                url=Config.BOOKING_ICS_URL,
+                source_type="booking"
+            )
+            added += 1
+        
+        if added > 0:
+            logger.info(f"{added} source(s) par défaut initialisée(s)")
+        
+        return added
+    
+    # =========================================================================
+    # ÉVÉNEMENTS
+    # =========================================================================
+    
+    def get_events(self, source_id: Optional[str] = None) -> List[Dict]:
+        """Récupère les événements, optionnellement filtrés par source."""
+        events = self._read_json(self._events_file)
+        
+        if source_id:
+            events = [e for e in events if e.get("source_id") == source_id]
         
         return events
     
-    def get_events_in_range(
-        self,
-        start: datetime,
-        end: datetime,
-        calendar_id: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """Récupère les événements dans une plage de dates."""
-        events = self.get_events(calendar_id)
-        
-        filtered = []
-        for event in events:
-            event_start = event.get("start")
-            event_end = event.get("end")
-            
-            # Convertir en datetime si nécessaire
-            if isinstance(event_start, str):
-                try:
-                    event_start = datetime.fromisoformat(event_start.replace("Z", "+00:00"))
-                except ValueError:
-                    continue
-            
-            if isinstance(event_end, str):
-                try:
-                    event_end = datetime.fromisoformat(event_end.replace("Z", "+00:00"))
-                except ValueError:
-                    event_end = event_start
-            
-            # Vérifier le chevauchement
-            if event_start and event_end:
-                if event_start <= end and event_end >= start:
-                    filtered.append(event)
-        
-        return filtered
+    def get_all_events(self) -> List[Dict]:
+        """Récupère tous les événements."""
+        return self._read_json(self._events_file)
     
-    # === Initialisation ===
+    def save_events(self, source_id: str, new_events: List[Dict]) -> int:
+        """Sauvegarde les événements d'une source (remplace les existants)."""
+        all_events = self.get_events()
+        
+        # Retirer les anciens événements de cette source
+        all_events = [e for e in all_events if e.get("source_id") != source_id]
+        
+        # Ajouter les nouveaux événements
+        for event in new_events:
+            event["source_id"] = source_id
+            event["synced_at"] = datetime.now(timezone.utc).isoformat()
+            all_events.append(event)
+        
+        self._write_json(self._events_file, all_events)
+        
+        # Mettre à jour le compteur de la source
+        self.update_source(source_id, {"event_count": len(new_events)})
+        
+        logger.debug(f"Sauvegardé {len(new_events)} événements pour source {source_id}")
+        return len(new_events)
     
-    def init_default_calendars(self) -> int:
-        """
-        Charge les calendriers depuis les variables d'environnement 
-        si aucun calendrier n'existe.
+    def delete_events_by_source(self, source_id: str) -> int:
+        """Supprime tous les événements d'une source."""
+        events = self.get_events()
+        initial_count = len(events)
         
-        Returns:
-            Nombre de calendriers ajoutés
-        """
-        # Si des calendriers existent déjà, ne rien faire
-        if self.get_all_calendars():
-            logger.debug("Des calendriers existent déjà, pas d'initialisation")
-            return 0
+        events = [e for e in events if e.get("source_id") != source_id]
+        deleted = initial_count - len(events)
         
-        added = 0
+        if deleted > 0:
+            self._write_json(self._events_file, events)
+            logger.debug(f"Supprimé {deleted} événements de la source {source_id}")
         
-        # Configuration des calendriers par défaut
-        default_calendars = [
-            ("AIRBNB_ICS", "Airbnb"),
-            ("BOOKING_ICS", "Booking.com"),
-            # Ajouter d'autres sources ici si besoin
-            ("VRBO_ICS", "VRBO"),
-            ("ABRITEL_ICS", "Abritel"),
-        ]
-        
-        for env_var, name in default_calendars:
-            url = os.getenv(env_var)
-            if url and url.strip():
-                # Vérifier que ce n'est pas un exemple/placeholder
-                if "example" in url.lower() or "12345" in url:
-                    logger.warning(f"URL d'exemple ignorée pour {env_var}")
-                    continue
-                
-                # Vérifier les doublons
-                if self.get_calendar_by_url(url):
-                    logger.warning(f"URL déjà existante, ignorée: {name}")
-                    continue
-                
-                self.add_calendar(name=name, url=url)
-                logger.info(f"✅ Calendrier '{name}' chargé depuis ${env_var}")
-                added += 1
-        
-        if added > 0:
-            logger.info(f"📅 {added} calendrier(s) par défaut initialisé(s)")
-        else:
-            logger.info("ℹ️  Aucun calendrier par défaut trouvé dans .env")
-        
-        return added
+        return deleted
+    
+    def clear_all(self):
+        """Supprime toutes les données (pour tests)."""
+        self._write_json(self._sources_file, [])
+        self._write_json(self._events_file, [])
+        logger.warning("Toutes les données ont été supprimées")
 
 
-# Instance globale
+# Instance globale (optionnel, pour compatibilité)
 storage = Storage()
