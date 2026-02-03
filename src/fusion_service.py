@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 import httpx
 import asyncio
 import logging
@@ -9,7 +9,7 @@ from src.utils import merge_ics, parse_events
 
 fusion_router = APIRouter()
 
-@fusion_router.get("/health", summary="Vérifie l'état du service")
+@fusion_router.get("/healthz", summary="Vérifie l'état du service")
 async def health_check():
     """Vérifie l'état du service de fusion."""
     return {
@@ -32,7 +32,7 @@ async def sync_calendars():
         async with httpx.AsyncClient(timeout=30.0) as client:
             airbnb_task = client.get(Config.AIRBNB_ICS)
             booking_task = client.get(Config.BOOKING_ICS)
-            airbnb_resp, booking_resp = await asyncio.gather(airbnb_task, booking_task)
+            airbnb_resp, booking_resp = await asyncio.gather(airbnb_task, booking_resp)
 
             airbnb_resp.raise_for_status()
             booking_resp.raise_for_status()
@@ -66,3 +66,18 @@ async def sync_calendars():
             status_code=500,
             detail=f"Erreur lors de la fusion des calendriers: {str(e)}"
         )
+
+@fusion_router.get("/export", summary="Exporte le calendrier fusionné")
+async def export_calendar():
+    """Exporte le calendrier fusionné au format .ics."""
+    if not os.path.exists(Config.OUTFILE):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Le fichier fusionné {Config.OUTFILE} n'existe pas. Lancez d'abord /api/fusion/sync."
+        )
+
+    return FileResponse(
+        Config.OUTFILE,
+        media_type="text/calendar",
+        filename=os.path.basename(Config.OUTFILE)
+    )
