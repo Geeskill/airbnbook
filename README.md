@@ -36,6 +36,18 @@
 - Git
 - Compte Airbnb et Booking.com avec accès aux URLs des calendriers
 
+```bash
+# Mettre à jour les paquets
+apt update && apt upgrade -y
+
+# Installer Python 3 et pip (gestionnaire de paquets Python)
+apt install -y python3 python3-pip python3-venv
+
+# Vérifier l'installation
+python3 --version  # Doit afficher Python 3.11.x
+pip3 --version     # Doit afficher pip 23.x
+```
+
 ### **2️⃣ Installation**
 ```bash
 # Cloner le dépôt
@@ -43,7 +55,7 @@ git clone https://github.com/Geeskill/airbnbook.git
 cd airbnbook
 
 # Créer un environnement virtuel
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate     # Windows
 
