@@ -95,7 +95,7 @@ nano .env
 ### **1️⃣ Interface Web**
 1. Lancez l'application :
 ```bash
-python src/main.py
+python -m src.main
 ```
 2. Accédez à [http://localhost:8080](http://localhost:8080)
 3. **Pages disponibles** :
