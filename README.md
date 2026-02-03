@@ -69,7 +69,7 @@ Créez un fichier `.env` à la racine du projet :
 ```ini
 # URLs des calendriers (à obtenir depuis Airbnb/Booking.com)
 AIRBNB_ICS="https://www.airbnb.com/calendar/ical/12345.ics"
-BOOKING_ICS="https://admin.booking.com/ical/67890.ics"
+BOOKING_ICS="https://admin.booking.com/ical/12345.ics"
 
 # Chemins des fichiers de sortie
 OUTFILE="data/unique-export.ics"
