@@ -1,0 +1,17 @@
+# Environnement Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environnement virtuel
+venv/
+.env
+
+# Logs
+logs/
+
+# Fichiers de configuration locaux
+*.env.local
+
+# Fichiers de sortie
+/srv/data/
