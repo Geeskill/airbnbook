@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.95.2-green.svg)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/votre-utilisateur/airbnbook/blob/main/LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/votre-utilisateur/airbnbook.svg?style=social)](https://github.com/votre-utilisateur/airbnbook)
+[![GitHub stars](https://img.shields.io/github/stars/geeskill/airbnbook.svg?style=social)](https://github.com/votre-utilisateur/airbnbook)
 
 ---
 
