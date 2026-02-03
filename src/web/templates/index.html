@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <section>
+        <h2>Synchronisation des calendriers</h2>
+        <div class="status">
+            <h3>État des services</h3>
+            <p>Fusion: <span id="fusion-status">Inconnu</span></p>
+            <p>Traduction: <span id="translate-status">Inconnu</span></p>
+        </div>
+        <div class="actions">
+            <button onclick="syncFusion()">Synchroniser les calendriers</button>
+            <button onclick="syncTranslate()">Traduire en français</button>
+            <button onclick="downloadICS()">Télécharger le calendrier</button>
+        </div>
+    </section>
+    <script>
+        async function checkStatus() {
+            const fusion = await fetch("/fusion/healthz").then(r => r.json());
+            const translate = await fetch("/translate/healthz").then(r => r.json());
+            document.getElementById("fusion-status").textContent = fusion.ok ? "OK" : "Erreur";
+            document.getElementById("translate-status").textContent = translate.ok ? "OK" : "Erreur";
+        }
+
+        async function syncFusion() {
+            const response = await fetch("/fusion/sync", { method: "POST" });
+            const data = await response.json();
+            alert(response.ok ? "Synchronisation réussie!" : `Erreur: ${data.detail}`);
+            checkStatus();
+        }
+
+        async function syncTranslate() {
+            const response = await fetch("/translate/sync", { method: "POST" });
+            const data = await response.json();
+            alert(response.ok ? "Traduction réussie!" : `Erreur: ${data.detail}`);
+        }
+
+        async function downloadICS() {
+            const response = await fetch("/translate/export");
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "calendrier_unifie.ics";
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            } else {
+                alert("Erreur lors du téléchargement du calendrier.");
+            }
+        }
+
+        checkStatus();
+    </script>
+{% endblock %}
