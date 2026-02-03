@@ -2,17 +2,21 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import logging
+import os
 from src.config import Config
 from src.fusion_service import fusion_router
 from src.convert_fr_service import translate_router
-import logging
 
-# Configuration du logging
+# Configuration du logging avec création automatique du dossier logs/
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)  # Crée le dossier s'il n'existe pas
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("logs/airbnbook.log"),
+        logging.FileHandler(os.path.join(LOG_DIR, "airbnbook.log")),
         logging.StreamHandler()
     ]
 )
@@ -77,7 +81,7 @@ async def update_config(request: Request):
 
 if __name__ == "__main__":
     uvicorn.run(
-        "main:app",
+        "src.main:app",  # Chemin corrigé pour python -m src.main
         host="0.0.0.0",
         port=config.WEB_PORT,
         reload=True,
