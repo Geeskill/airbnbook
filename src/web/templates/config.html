@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <section>
+        <h2>Configuration</h2>
+        <form action="/config" method="post">
+            <div class="form-group">
+                <label for="airbnb_ics">URL du calendrier Airbnb:</label>
+                <input type="text" id="airbnb_ics" name="airbnb_ics" value="{{ config.AIRBNB_ICS }}" required>
+            </div>
+            <div class="form-group">
+                <label for="booking_ics">URL du calendrier Booking:</label>
+                <input type="text" id="booking_ics" name="booking_ics" value="{{ config.BOOKING_ICS }}" required>
+            </div>
+            <div class="form-group">
+                <label for="outfile">Chemin du fichier fusionné:</label>
+                <input type="text" id="outfile" name="outfile" value="{{ config.OUTFILE }}" required>
+            </div>
+            <div class="form-group">
+                <label for="outfile_fr">Chemin du fichier traduit:</label>
+                <input type="text" id="outfile_fr" name="outfile_fr" value="{{ config.OUTFILE_FR }}" required>
+            </div>
+            <button type="submit">Sauvegarder</button>
+        </form>
+    </section>
+{% endblock %}
