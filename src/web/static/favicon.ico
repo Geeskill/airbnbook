@@ -1,0 +1,9 @@
+from fastapi.staticfiles import StaticFiles
+
+# Après app = FastAPI()
+app.mount("/static", StaticFiles(directory="src/web/static"), name="static")
+
+# Route pour le favicon
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse("src/web/static/favicon.ico")
