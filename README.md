@@ -21,18 +21,6 @@
 
 ---
 
-## **📸 Captures d'écran**
-
-### **1️⃣ Tableau de bord (Accueil)**
-![Dashboard](https://via.placeholder.com/800x500?text=AirbnBook+Dashboard)
-*Statut des services, boutons de synchronisation et téléchargement.*
-
-### **2️⃣ Page de configuration**
-![Configuration](https://via.placeholder.com/800x500?text=Configuration+AirbnBook)
-*Personnalisation des URLs des calendriers et chemins de fichiers.*
-
----
-
 ## **🔧 Installation**
 
 ### **1️⃣ Prérequis**
@@ -105,7 +93,7 @@ python src/main.py
 ## **📂 Structure du projet**
 ```
 airbnbook/
-├── .env                    # Fichier de configuration
+├── .env                    # Variables d'environnement
 ├── .gitignore              # Fichiers ignorés par Git
 ├── LICENSE                 # Licence MIT
 ├── README.md               # Documentation
@@ -113,14 +101,20 @@ airbnbook/
 ├── logs/                   # Dossier des logs
 │   ├── airbnbook.log       # Logs principaux
 │   └── errors.log          # Logs d'erreurs
-├── src/                    # Code source
+├── src/
+│   ├── __init__.py         # Initialisation du package
 │   ├── config.py           # Chargement des variables d'environnement
-│   ├── fusion_service.py   # Service de fusion des calendriers
-│   ├── convert_fr_service.py # Service de traduction
+│   ├── fusion_service.py   # Service de fusion des calendriers (API)
+│   ├── convert_fr_service.py # Service de traduction (API)
 │   ├── web/                # Interface web
+│   │   ├── __init__.py
 │   │   ├── templates/      # Templates HTML (Jinja2)
+│   │   │   ├── base.html
+│   │   │   ├── index.html
+│   │   │   └── config.html
 │   │   └── static/         # Fichiers statiques (CSS, JS)
-│   └── main.py             # Point d'entrée principal
+│   │       └── style.css
+│   └── main.py             # Point d'entrée principal (serveur FastAPI)
 └── tests/                  # Tests unitaires (à venir)
 ```
 
