@@ -39,7 +39,7 @@
 ### **2️⃣ Installation**
 ```bash
 # Cloner le dépôt
-git clone https://github.com/votre-utilisateur/airbnbook.git
+git clone https://github.com/Geeskill/airbnbook.git
 cd airbnbook
 
 # Créer un environnement virtuel
