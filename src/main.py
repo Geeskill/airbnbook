@@ -78,7 +78,11 @@ async def update_config(request: Request):
             "message": "Configuration mise à jour avec succès!"
         }
     )
-
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Retourne le favicon."""
+    return FileResponse("src/web/static/favicon.ico")
+    
 if __name__ == "__main__":
     uvicorn.run(
         "src.main:app",  # Chemin corrigé pour python -m src.main
