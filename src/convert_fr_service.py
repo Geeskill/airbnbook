@@ -7,7 +7,7 @@ from src.utils import translate_ics_summary_only, unfold, fold
 
 translate_router = APIRouter()
 
-@translate_router.get("/health", summary="Vérifie l'état du service")
+@translate_router.get("/healthz", summary="Vérifie l'état du service")
 async def health_check():
     """Vérifie l'état du service de traduction."""
     return {
