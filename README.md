@@ -65,6 +65,7 @@ pip install -r requirements.txt
 
 ### **3️⃣ Configuration**
 Créez un fichier `.env` à la racine du projet :
+
 ```ini
 # URLs des calendriers (à obtenir depuis Airbnb/Booking.com)
 AIRBNB_ICS="https://www.airbnb.com/calendar/ical/12345.ics"
@@ -76,6 +77,15 @@ OUTFILE_FR="data/unique-export-fr.ics"
 
 # Port du serveur web
 WEB_PORT=8080
+```
+Ou copiez depuis le .env.exemple
+
+```bash
+# Créer le fichier .env
+cp .env.example .env
+
+# Éditer le fichier .env avec vos URLs de calendriers
+nano .env
 ```
 
 ---
